@@ -4,14 +4,13 @@ const app = express();
 
 app.use(express.json());
 
+const healthRoutes = require("./routes/health.routes");
 
-app.get("/api/status", (req, res) => {
-    res.json({
-        status: "online",
-        service: "DevOps Platform API",
-        version: "1.0.0"
-    });
-});
+const statusRoutes = require("./routes/status.routes");
+
+app.use("/api/health", healthRoutes);
+
+app.use("/api/status", statusRoutes);
 
 
 module.exports = app;
