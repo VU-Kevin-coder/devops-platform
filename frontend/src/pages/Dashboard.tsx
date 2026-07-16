@@ -1,40 +1,64 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Activity, Container, Gauge, HardDrive, Network, Server, TimerReset } from 'lucide-react'
+import { Activity, Container, Gauge, HardDrive, Network, RefreshCcw, Server, TimerReset } from 'lucide-react'
 import { StatusCard } from '../components/StatusCard'
 import { MetricCard } from '../components/MetricCard'
 import { HealthIndicator } from '../components/HealthIndicator'
-import { fetchHealth, fetchStatus } from '../services/api'
+import { fetchHealth } from '../services/health.service'
+import { fetchStatus } from '../services/status.service'
+
+interface HealthData {
+  status?: string
+  uptime?: number
+  environment?: string
+  timestamp?: string
+}
+
+interface StatusData {
+  status?: string
+  service?: string
+  version?: string
+}
 
 export function Dashboard() {
   const [apiStatus, setApiStatus] = useState<string>('Loading...')
-  const [healthData, setHealthData] = useState<{
-    status?: string
-    uptime?: number
-    environment?: string
-    timestamp?: string
-  } | null>(null)
-  const [statusData, setStatusData] = useState<{
-    status?: string
-    service?: string
-    version?: string
-  } | null>(null)
+  const [healthData, setHealthData] = useState<HealthData | null>(null)
+  const [statusData, setStatusData] = useState<StatusData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true)
-      const [statusResult, healthResult] = await Promise.all([fetchStatus(), fetchHealth()])
-      setStatusData(statusResult.data)
-      setHealthData(healthResult.data)
-      setApiStatus(statusResult.error || healthResult.error || 'Online')
-      setLoading(false)
+  async function loadData() {
+    setLoading(true)
+    setError(null)
+
+    const [statusResult, healthResult] = await Promise.all([fetchStatus(), fetchHealth()])
+
+    setStatusData(statusResult.data)
+    setHealthData(healthResult.data)
+
+    if (statusResult.error && healthResult.error) {
+      setError(`${statusResult.error} • ${healthResult.error}`)
+      setApiStatus('Unavailable')
+    } else if (statusResult.error) {
+      setError(statusResult.error)
+      setApiStatus('Unavailable')
+    } else if (healthResult.error) {
+      setError(healthResult.error)
+      setApiStatus('Unavailable')
+    } else {
+      setApiStatus(statusResult.data?.status ?? 'online')
     }
 
-    loadData()
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    void loadData()
   }, [])
 
   const uptimeHours = healthData?.uptime ? Math.floor(healthData.uptime / 3600) : 72
+  const systemStatus = statusData?.status ?? 'online'
+  const environment = healthData?.environment ?? 'development'
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -45,13 +69,25 @@ export function Dashboard() {
               <p className="text-sm text-cyan-400">Live infrastructure</p>
               <h2 className="mt-1 text-2xl font-semibold text-slate-100">Platform health overview</h2>
             </div>
-            <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
-              {loading ? 'Refreshing data' : 'All systems green'}
-            </div>
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              className="flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-300"
+            >
+              <RefreshCcw size={14} />
+              {loading ? 'Refreshing data' : 'Retry sync'}
+            </button>
           </div>
+
+          {error ? (
+            <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-300">
+              {error}
+            </div>
+          ) : null}
+
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            <StatusCard title="System status" value={statusData?.status ?? 'online'} icon={Activity} detail="Core services responding" tone="success" />
-            <StatusCard title="API gateway" value={apiStatus} icon={Server} detail="Connected to backend" tone="info" />
+            <StatusCard title="System status" value={systemStatus} icon={Activity} detail="Core services responding" tone={error ? 'warning' : 'success'} />
+            <StatusCard title="API gateway" value={apiStatus} icon={Server} detail="Connected to backend" tone={error ? 'warning' : 'info'} />
             <StatusCard title="Uptime" value={`${uptimeHours}h`} icon={TimerReset} detail="Since last reboot" tone="warning" />
           </div>
         </div>
@@ -59,9 +95,9 @@ export function Dashboard() {
         <div className="rounded-[28px] border border-slate-800 bg-slate-900/70 p-6">
           <p className="text-sm text-slate-400">Observability snapshot</p>
           <div className="mt-4 space-y-3">
-            <HealthIndicator label="API status" value={statusData?.status ?? 'online'} tone="success" />
+            <HealthIndicator label="API status" value={loading ? 'Loading...' : systemStatus} tone={error ? 'warning' : 'success'} />
+            <HealthIndicator label="Environment" value={environment} tone="info" />
             <HealthIndicator label="Docker engine" value="Healthy" tone="success" />
-            <HealthIndicator label="CI pipeline" value="Passing" tone="info" />
             <HealthIndicator label="Disk pressure" value="Nominal" tone="warning" />
           </div>
         </div>
