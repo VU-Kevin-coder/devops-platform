@@ -4,6 +4,8 @@ export interface HealthResponse {
   status: string
   uptime: number
   environment: string
+  hostname?: string
+  pid?: number
   timestamp: string
 }
 
@@ -11,6 +13,10 @@ export interface StatusResponse {
   status: string
   service: string
   version: string
+  environment: string
+  hostname?: string
+  pid?: number
+  timestamp: string
 }
 
 const api = axios.create({
