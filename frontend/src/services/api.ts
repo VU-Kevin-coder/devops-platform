@@ -1,10 +1,5 @@
 import axios from 'axios'
 
-const api = axios.create({
-  baseURL: 'http://localhost:5000',
-  timeout: 5000
-})
-
 export interface HealthResponse {
   status: string
   uptime: number
@@ -18,20 +13,21 @@ export interface StatusResponse {
   version: string
 }
 
-export async function fetchStatus() {
-  try {
-    const response = await api.get<StatusResponse>('/api/status')
-    return { data: response.data, error: null }
-  } catch (error) {
-    return { data: null, error: 'Status service unavailable' }
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000',
+  timeout: 5000
+})
+
+export function getApiErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    return error.response?.data?.error || error.message || 'Request failed'
   }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return 'Request failed'
 }
 
-export async function fetchHealth() {
-  try {
-    const response = await api.get<HealthResponse>('/api/health')
-    return { data: response.data, error: null }
-  } catch (error) {
-    return { data: null, error: 'Health endpoint unreachable' }
-  }
-}
+export { api }
