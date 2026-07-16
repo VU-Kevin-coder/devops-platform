@@ -11,6 +11,8 @@ interface HealthData {
   status?: string
   uptime?: number
   environment?: string
+  hostname?: string
+  pid?: number
   timestamp?: string
 }
 
@@ -18,6 +20,27 @@ interface StatusData {
   status?: string
   service?: string
   version?: string
+  environment?: string
+  hostname?: string
+  pid?: number
+  timestamp?: string
+}
+
+interface ConnectionInfo {
+  effectiveType?: string
+  downlink?: number
+  rtt?: number
+}
+
+interface MemoryInfo {
+  used: number
+  total: number
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  const mb = bytes / (1024 * 1024)
+  return `${mb.toFixed(1)} MB`
 }
 
 export function Dashboard() {
@@ -26,13 +49,21 @@ export function Dashboard() {
   const [statusData, setStatusData] = useState<StatusData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [apiLatency, setApiLatency] = useState<number | null>(null)
+  const [browserMemory, setBrowserMemory] = useState<MemoryInfo | null>(null)
+  const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo | null>(null)
+  const [pageLoadMs, setPageLoadMs] = useState<number | null>(null)
+  const [isOnline, setIsOnline] = useState(true)
 
   async function loadData() {
     setLoading(true)
     setError(null)
 
+    const startedAt = performance.now()
     const [statusResult, healthResult] = await Promise.all([fetchStatus(), fetchHealth()])
+    const latency = Math.round(performance.now() - startedAt)
 
+    setApiLatency(latency)
     setStatusData(statusResult.data)
     setHealthData(healthResult.data)
 
@@ -53,12 +84,45 @@ export function Dashboard() {
   }
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const memory = (performance as Performance & { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory
+    if (memory) {
+      setBrowserMemory({
+        used: memory.usedJSHeapSize,
+        total: memory.totalJSHeapSize
+      })
+    }
+
+    const connection = (navigator as Navigator & { connection?: ConnectionInfo }).connection
+    if (connection) {
+      setConnectionInfo(connection)
+    }
+
+    const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+    if (navEntry) {
+      setPageLoadMs(Math.round(navEntry.domContentLoadedEventEnd - navEntry.startTime))
+    }
+
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
     void loadData()
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
   }, [])
 
-  const uptimeHours = healthData?.uptime ? Math.floor(healthData.uptime / 3600) : 72
+  const uptimeHours = healthData?.uptime ? Math.floor(healthData.uptime / 3600) : 0
   const systemStatus = statusData?.status ?? 'online'
-  const environment = healthData?.environment ?? 'development'
+  const environment = healthData?.environment ?? statusData?.environment ?? 'development'
+  const backendHost = healthData?.hostname ?? statusData?.hostname ?? 'unknown'
+  const backendPid = healthData?.pid ?? statusData?.pid ?? 0
+  const lastUpdated = healthData?.timestamp ?? statusData?.timestamp ?? new Date().toISOString()
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -88,7 +152,7 @@ export function Dashboard() {
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             <StatusCard title="System status" value={systemStatus} icon={Activity} detail="Core services responding" tone={error ? 'warning' : 'success'} />
             <StatusCard title="API gateway" value={apiStatus} icon={Server} detail="Connected to backend" tone={error ? 'warning' : 'info'} />
-            <StatusCard title="Uptime" value={`${uptimeHours}h`} icon={TimerReset} detail="Since last reboot" tone="warning" />
+            <StatusCard title="Uptime" value={`${uptimeHours}h`} icon={TimerReset} detail="Measured from backend" tone="warning" />
           </div>
         </div>
 
@@ -97,17 +161,17 @@ export function Dashboard() {
           <div className="mt-4 space-y-3">
             <HealthIndicator label="API status" value={loading ? 'Loading...' : systemStatus} tone={error ? 'warning' : 'success'} />
             <HealthIndicator label="Environment" value={environment} tone="info" />
-            <HealthIndicator label="Docker engine" value="Healthy" tone="success" />
-            <HealthIndicator label="Disk pressure" value="Nominal" tone="warning" />
+            <HealthIndicator label="Browser online" value={isOnline ? 'Yes' : 'No'} tone={isOnline ? 'success' : 'warning'} />
+            <HealthIndicator label="Last update" value={new Date(lastUpdated).toLocaleTimeString()} tone="info" />
           </div>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="CPU Usage" value="47%" subtitle="Average load across host" progress={47} accent="from-cyan-500 to-sky-400" />
-        <MetricCard title="Memory Usage" value="63%" subtitle="12.8 GB / 20 GB RAM" progress={63} accent="from-violet-500 to-fuchsia-500" />
-        <MetricCard title="Storage" value="74%" subtitle="Disk utilization on /dev/sda1" progress={74} accent="from-emerald-500 to-lime-500" />
-        <MetricCard title="Network" value="1.2 Gb/s" subtitle="Incoming 840 Mb/s • Outgoing 360 Mb/s" progress={68} accent="from-amber-500 to-orange-500" />
+        <MetricCard title="API latency" value={`${apiLatency ?? 0} ms`} subtitle="Round-trip response time" progress={Math.min(apiLatency ?? 0, 100)} accent="from-cyan-500 to-sky-400" />
+        <MetricCard title="Browser memory" value={browserMemory ? formatBytes(browserMemory.used) : 'Unavailable'} subtitle={browserMemory ? `Heap used • ${formatBytes(browserMemory.total)} total` : 'Runtime memory unavailable'} progress={browserMemory ? Math.min(Math.round((browserMemory.used / browserMemory.total) * 100), 100) : 0} accent="from-violet-500 to-fuchsia-500" />
+        <MetricCard title="Connection" value={connectionInfo?.effectiveType ?? 'Unknown'} subtitle={connectionInfo?.downlink ? `${connectionInfo.downlink.toFixed(1)} Mb/s • ${connectionInfo.rtt ?? 0} ms RTT` : 'Live browser connection'} progress={connectionInfo?.downlink ? Math.min(Math.round(connectionInfo.downlink * 10), 100) : 0} accent="from-emerald-500 to-lime-500" />
+        <MetricCard title="Page load" value={`${pageLoadMs ?? 0} ms`} subtitle="DOM ready timing" progress={pageLoadMs ? Math.min(Math.round(pageLoadMs / 10), 100) : 0} accent="from-amber-500 to-orange-500" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -115,7 +179,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">Host details</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-100">System status</h3>
+              <h3 className="mt-1 text-xl font-semibold text-slate-100">Runtime status</h3>
             </div>
             <div className="rounded-full border border-slate-800 bg-slate-950/70 p-2 text-slate-400">
               <Gauge size={16} />
@@ -126,16 +190,16 @@ export function Dashboard() {
             <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
               <div className="flex items-center gap-3 text-slate-300">
                 <Server size={16} className="text-cyan-400" />
-                <span className="text-sm">Server uptime</span>
+                <span className="text-sm">Backend host</span>
               </div>
-              <p className="mt-3 text-2xl font-semibold text-slate-100">{uptimeHours}h 14m</p>
+              <p className="mt-3 text-2xl font-semibold text-slate-100">{backendHost}</p>
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
               <div className="flex items-center gap-3 text-slate-300">
                 <HardDrive size={16} className="text-cyan-400" />
-                <span className="text-sm">OS</span>
+                <span className="text-sm">Backend PID</span>
               </div>
-              <p className="mt-3 text-2xl font-semibold text-slate-100">Kali Linux 2025</p>
+              <p className="mt-3 text-2xl font-semibold text-slate-100">{backendPid || 'unknown'}</p>
             </div>
           </div>
         </div>
@@ -143,8 +207,8 @@ export function Dashboard() {
         <div className="rounded-[28px] border border-slate-800 bg-slate-900/70 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-400">Container health</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-100">Docker overview</h3>
+              <p className="text-sm text-slate-400">Runtime details</p>
+              <h3 className="mt-1 text-xl font-semibold text-slate-100">Service metadata</h3>
             </div>
             <div className="rounded-full border border-slate-800 bg-slate-950/70 p-2 text-slate-400">
               <Container size={16} />
@@ -154,15 +218,15 @@ export function Dashboard() {
           <div className="mt-6 space-y-3">
             <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-4">
               <div>
-                <p className="font-medium text-slate-100">Running containers</p>
-                <p className="text-sm text-slate-400">nginx-server • devops-backend</p>
+                <p className="font-medium text-slate-100">Service version</p>
+                <p className="text-sm text-slate-400">{statusData?.version ?? '1.0.0'}</p>
               </div>
-              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-sm text-emerald-300">2 active</span>
+              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-sm text-emerald-300">{environment}</span>
             </div>
             <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-4">
               <div>
-                <p className="font-medium text-slate-100">Network traffic</p>
-                <p className="text-sm text-slate-400">Stable inbound and outbound flow</p>
+                <p className="font-medium text-slate-100">Network profile</p>
+                <p className="text-sm text-slate-400">{connectionInfo?.effectiveType ?? 'unknown'} • {connectionInfo?.downlink ? `${connectionInfo.downlink.toFixed(1)} Mb/s` : 'no data'}</p>
               </div>
               <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-sm text-cyan-300">
                 <Network size={14} className="inline" />
